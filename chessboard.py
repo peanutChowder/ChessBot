@@ -1,11 +1,11 @@
 import pygame
-from moveset import MoveSets
 from chessGame import Game
+from chessGame import MoveSet
 
 
 def main():
     pygame.init()
-    surface = pygame.display.set_mode((1200, 800))
+    surface = pygame.display.set_mode((1350, 800))
     pygame.display.set_caption("Chess")
     a = ChessWindow(surface)
     a.play()
@@ -33,17 +33,25 @@ class ChessWindow:
         self.backgroundColor = pygame.Color("black")
 
         # Board specific attribute
-        self.boardMargin = 0.15   # This means the top and bottom margins are 10% of the entire screen, respectively
+        self.boardMargin = 0.15   # Percent height a single margin takes up
         self.chessBoard = None
         self.createBoard()
 
     def createBoard(self):
+        """
+        Initializes the board object. Does not include the margin areas.
+        :return: None
+        """
         boardTop = self.surface.get_height() * self.boardMargin
         boardBottom = self.surface.get_height() - (self.surface.get_height() * self.boardMargin)
 
         self.chessBoard = ChessBoard(self.surface, boardTop, boardBottom)
 
     def play(self):
+        """
+        Main loop. Runs infinitely until the user closes the window.
+        :return: None
+        """
         while not self.close:
             self.handleEvents()
             self.draw()
@@ -51,6 +59,10 @@ class ChessWindow:
             self.clock.tick(self.fps)
 
     def handleEvents(self):
+        """
+        Handles all user-generated events, i.e. clicking.
+        :return: None
+        """
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.close = True
@@ -62,13 +74,29 @@ class ChessWindow:
                 print("click: ", pygame.mouse.get_pos())
 
     def draw(self):
+        """
+        Main drawing method, calls other objects' drawing methods to generate a visual representation.
+        :return: None
+        """
         self.surface.fill(self.backgroundColor)
         self.chessBoard.draw()
         pygame.display.update()
 
 
 class PromotionDisplay:
+    """
+    An object representing the temporary display that appears when a pawn reaches its opposite side. The presence of
+    this display overwrites tile clicks so that the game only reacts to clicks on the Promotion display.
+
+    This object handles promotion within itself. All promoted pieces are assigned a unique negative id/number. Following
+    promotion the instance is thrown to the garbage collector implicitly.
+    """
     def __init__(self, colorPrefix, surface, promotionPiece):
+        """
+        :param colorPrefix: str of the pawn's color
+        :param surface: pygame.surface object of the surface to display to
+        :param promotionPiece: ChessPiece object of the pawn to be promoted
+        """
         self.surface = surface
         self.colorPrefix = colorPrefix
         self.promotionPiece = promotionPiece
@@ -90,6 +118,10 @@ class PromotionDisplay:
         self.initPromotionOptions()
 
     def initPromotionOptions(self):
+        """
+        Initializes the possible pieces the pawn could be promoted to.
+        :return: None
+        """
         strOptions = ["queen", "knight", "rook", "bishop"]
         x = self.width / 5
         padding = x / 2
@@ -107,6 +139,10 @@ class PromotionDisplay:
             self.promotedPieceID -= 1
 
     def draw(self):
+        """
+        Draws the promotion board.
+        :return: None
+        """
         pygame.draw.rect(self.surface, self.backgroundColor, self.windowBackground)
         for tile in self.promotionOptionList:
             tile.draw()
@@ -116,18 +152,35 @@ class PromotionDisplay:
         self.surface.blit(self.textSurface, (self.x + 40, self.y + (self.height - 30)))
 
     def getPromotionSelection(self, mouseCoords):
+        """
+        Intercepts the user's click and checks which piece they selected for their pawn to be promoted to.
+        :param mouseCoords: tuple of the user click's coordinates
+        :return: str of the clicked piece's name
+        """
         for tile in self.promotionOptionList:
             if tile.rect.collidepoint(mouseCoords):
-                self.promotePiece(tile.currentPiece.name, tile.currentPiece.image)
+                self.promotePiece(tile.currentPiece.name, tile.currentPiece.image, tile.currentPiece.num)
 
                 return tile.currentPiece.name
 
-    def promotePiece(self, newName, newImage):
-        self.promotionPiece.name = newName
-        self.promotionPiece.image = newImage
+    def promotePiece(self, newName, newImage, newID):
+        """
+        Updates the piece's attributes so that in the future the correct moveset is generated for the promoted piece.
+        :param newName: str of the piece that the pawn is being promoted to
+        :param newImage: pygame.image object of the piece that the pawn is being promoted to
+        :param newID: int of the newly promoted piece
+        :return: None
+        """
+        self.promotionPiece.setName(newName)
+        self.promotionPiece.setID(newID)
+        self.promotionPiece.setImage(newImage)
 
 
 class CapturedPiecesMargin:
+    """
+    Object representing a single margin. Takes up the empty spaces outside of the chess board. Displays the captured
+    pieces of the corresponding side.
+    """
     surface = None
 
     @classmethod
@@ -175,7 +228,6 @@ class CapturedPiecesMargin:
 
 
 class ChessBoard:
-    game = Game()
     def __init__(self, surface, top, bottom):
         """
         Object of the board itself, i.e. only the checkerboard excluding top/bottom margins
@@ -184,6 +236,7 @@ class ChessBoard:
         :param bottom: Bottom coordinate of the ChessBoard object
         """
         self.surface = surface
+        self.gameOver = False
         self.top = top
         self.bottom = bottom
         self.size = (surface.get_width(), self.bottom - self.top)
@@ -194,6 +247,7 @@ class ChessBoard:
         self.currentlyClicked = None
 
         # Piece specific attributes/methods
+        MoveSet.setChessBoard(self)
         self.whitePieces = None
         self.blackPieces = None
         self.createPieces()
@@ -201,17 +255,14 @@ class ChessBoard:
         # Promotion board specific attributes/methods
         self.promotionBoard = None
 
+        # Game flow specific attributes/methods
+        self.game = Game(self)
+        self.setPieceMovesets()
+
         # deleteme
         self.testerImage = pygame.image.load("tester-img.png")
         self.testerImage = pygame.transform.scale(self.testerImage, (30, 30))
-
-
-        # deleteme or not...?
-        # Game specific attributes/methods
-        self.draw()
-        ChessBoard.game.setChessBoard(self)
-        ChessBoard.game.updateEntireMoveset("b_", self.blackPieces)
-        ChessBoard.game.updateEntireMoveset("w_", self.whitePieces)
+        self.moveCount = 0
 
     def createPieces(self):
         blackPiecePrefix = "b_"
@@ -222,6 +273,11 @@ class ChessBoard:
         PieceSet.setBoard(self)
         self.blackPieces = PieceSet(bPiecePath, blackPiecePrefix, 0, self.top)
         self.whitePieces = PieceSet(wPiecePath, whitePiecePrefix, self.bottom, self.surface.get_height())
+
+    def setPieceMovesets(self):
+        for pieceSet in [self.blackPieces, self.whitePieces]:
+            for piece in pieceSet.pieces:
+                piece.getMoveSet()
 
     def createTiles(self):
         tileColorList = [pygame.Color(240, 230, 230), pygame.Color(90, 90, 90)]   # A list of the checkerboard colours
@@ -242,14 +298,32 @@ class ChessBoard:
             currentColor = alternator(currentColor, tileColorList)     # This is required to create the checker pattern
             self.board.append(row)
 
+    def dispGameOver(self):
+        textFont = pygame.font.SysFont("arial", 50)
+        textSurface = textFont.render(self.gameOver, False, (250, 140, 255))
+
+        x = self.surface.get_width() / 2 - (textSurface.get_width() / 2)
+        y = self.surface.get_height() / 2 - (textSurface.get_height() / 2)
+        self.surface.blit(textSurface, (x, y))
+
+    def getPlayerMove(self, mouseCoords):
+        pass
+
     def checkBoardClick(self, mouseCoords):
-        if self.promotionBoard:
+        if self.gameOver:
+            pass
+        elif self.promotionBoard:
             selection = self.promotionBoard.getPromotionSelection(mouseCoords)
             if selection:
+                self.game.alternateCurrentColor()
+                self.postMovementUpdates()
                 self.promotionBoard = None
 
         # Tiles do not react to clicks while the promotion board is open
         else:
+            # Check legality of moves and endgame conditions
+            self.preMovementUpdates()
+
             for rowNum in range(len(self.board)):
                 for colNum in range(len(self.board[rowNum])):
                     tile = self.board[rowNum][colNum]
@@ -258,123 +332,100 @@ class ChessBoard:
                     if tile.rect.collidepoint(mouseCoords):
                         # Nothing is currently selected and the clicked tile contains a piece of the current color
                         if tile.currentPiece and not self.currentlyClicked \
-                                and tile.currentPiece.colorPrefix == ChessBoard.game.currentColor:
+                                and tile.currentPiece.colorPrefix == self.game.currentColor:
                             self.toggleClickAttributes(tile)
-                            tile.currentPiece.getMoveSet()
+                            tile.currentPiece.moveset.setTileValidMove(True)
 
                         # A tile with a piece is currently selected and the user deselects it by re-clicking it
                         elif tile == self.currentlyClicked:
+                            self.currentlyClicked.currentPiece.moveset.setTileValidMove(False)
                             self.toggleClickAttributes(tile)
-                            ChessPiece.movesetObj.setTileValidMove(False)
 
                         # Move the currently selected piece to the new tile
                         elif self.currentlyClicked and tile.validMove:
                             print(f"============={self.currentlyClicked.currentPiece.name} has moved")  # Diagnostic
 
-                            # If the valid new tile contains an opposing piece, capture it
-                            if tile.currentPiece:
-                                self.capturePiece(tile)
-                            elif self.currentlyClicked.currentPiece.name == "pawn":
-                                self.checkEnPassant((rowNum, colNum))
-                            elif self.currentlyClicked.currentPiece.name == "king":
-                                self.checkCastling((rowNum, colNum))
+                            # Handle all piece movements (capturing, check, etc.)
+                            self.movementUpdates(tile, rowNum, colNum)
 
-                            movedPiece = self.currentlyClicked.currentPiece
+                            # Handle post-move related attributes/events (e.g. movesets, check, changing turn...)
+                            self.postMovementUpdates()
 
-                            ChessPiece.movesetObj.setTileValidMove(False)
-                            self.movePiece(self.currentlyClicked, (rowNum, colNum))
-                            self.toggleClickAttributes(self.currentlyClicked)
-
-                            if movedPiece.name == "pawn":
-                                self.checkPromotion(movedPiece)
-
-                            ChessBoard.game.alternateCurrentColor()
-                            ChessBoard.game.updateEntireMoveset("w_", self.whitePieces)
-                            ChessBoard.game.updateEntireMoveset("b_", self.blackPieces)
-
-    @staticmethod
-    def movePiece(oldTile, newTileIndices):
-        chessPiece = oldTile.currentPiece
-        chessPiece.unMoved = False
-
-        oldTile.currentPiece = None
-        chessPiece.setIndices(newTileIndices)
-
-    def checkPromotion(self, movedPawn):
-        print(movedPawn.yIndex)
-        if (movedPawn.colorPrefix == "b_" and movedPawn.yIndex == 7) or \
-                (movedPawn.colorPrefix == "w_" and movedPawn.yIndex == 0):
-            self.promotionBoard = PromotionDisplay(movedPawn.colorPrefix, self.surface, movedPawn)
-
-    def checkCastling(self, tileIndices):
-        king = self.currentlyClicked.currentPiece
-
-        kingMoveset = ChessPiece.movesetObj.verifiedMoves
-        if abs(tileIndices[0] - king.xIndex) == 2 and tileIndices in kingMoveset["left"] + kingMoveset["right"]:
-            if tileIndices[0] == 2:
-                self.movePiece(self.board[0][king.yIndex], (3, king.yIndex))
-            elif tileIndices[0] == 6:
-                self.movePiece(self.board[7][king.yIndex], (5, king.yIndex))
-            else:
-                raise Exception("Invalid movement during castling.")
-
-    def capturePiece(self, newTile):
+    def preMovementUpdates(self):
         """
-        Pops the captured piece from the opponent's PieceSet.pieces list. The new tile's currentPiece attr. is set
-        to None as a defensive measure. Appends the captured piece to the current player's PieceSet.CapturedPiecesMargin
-        list of captured pieces. Method only works for moves where the current piece takes the place of the captured
-        piece. (i.e. doesn't work for en passant)
-        :param newTile: Tile object of the destination of the move. newTile is ASSUMED to contain an opponent's piece
+        Wrapper method containing the necessary methods to be called before a turn begins. Checks endgame conditions,
+        and re-verifies the king's moveset to ensure king captures do not occur.
         :return: None
         """
-        capturedPiece = newTile.currentPiece
+        # Remove any moves that could leave the king in check
+        self.game.kingCheckVerification(self.getPieceSet(self.game.currentColor).king,
+                                        self.getPieceSet(self.game.opponentColor))
 
-        opponentPieces = self.getPieceSet(capturedPiece.colorPrefix)
-        capturedPiecesObj = self.getCapturedMargin(self.currentlyClicked.currentPiece.colorPrefix)
+        # Update and check whether the current player has any legal moves
+        self.game.checkLegalMoveExists(self.getPieceSet(self.game.currentColor))
 
-        opponentPieces.pop(opponentPieces.index(capturedPiece))
-        newTile.currentPiece = None
-        capturedPiecesObj.addCapturedPiece(capturedPiece)
+        # Check whether the game has ended (stalemate / checkmate)
+        self.gameOver = self.game.checkGameOver()
 
-    def checkEnPassant(self, newTileIndices):
+    def movementUpdates(self, tile, rowNum, colNum):
         """
-        Checks if an en passant move is possible. Strictly for pawns. Additionally ASSUMES the provided newTile is not
-        occupied by anything, as opponent-occupied tiles should have been caught in self.checkBoardClick.
-        Executes the en passant move if possible.
-        :param newTileIndices: Tuple of the newTile indices. Explicitly passed in because Tile objects do not have an
-        attribute keeping track of their indices.
+        Wrapper method to perform a piece move. Toggles tile attributes to return it to its default state after a piece
+        leaves it.
+        :param tile: Tile object of the tile to move to
+        :param rowNum: int index of the tile's row
+        :param colNum: int index of the tile's col
         :return: None
         """
-        currentPiece = self.currentlyClicked.currentPiece
-        diagonalMove = ["left-down", "right-down"] if currentPiece.colorPrefix == "b_" else ["left-up", "right-up"]
-        legalMoves = ChessPiece.movesetObj.verifiedMoves
+        # If the valid new tile contains an opposing piece, capture it
+        if tile.currentPiece:
+            self.game.capturePiece(tile)
+        elif self.currentlyClicked.currentPiece.name == "pawn":
+            self.game.checkEnPassant((rowNum, colNum))
+        elif self.currentlyClicked.currentPiece.name == "king":
+            self.game.checkCastling((rowNum, colNum), self.currentlyClicked.currentPiece)
 
-        # En passant valid when a pawn can move diagonally yet its destination tile is empty
-        if newTileIndices in legalMoves[diagonalMove[0]] or newTileIndices in legalMoves[diagonalMove[1]]:
+        self.game.checkPawnDoublestep(self.currentlyClicked.currentPiece, colNum)
 
-            # En passant for black pieces
-            if newTileIndices[1] > currentPiece.yIndex:
-                tileContainingPawn = self.board[newTileIndices[0]][newTileIndices[1] - 1]
-                capturedPiece = tileContainingPawn.currentPiece
-            # White pieces
-            elif newTileIndices[1] < currentPiece.yIndex:
-                tileContainingPawn = self.board[newTileIndices[0]][newTileIndices[1] + 1]
-                capturedPiece = tileContainingPawn.currentPiece
-            else:
-                raise Exception("Pieces are in wrong locations for en passant.")
+        movedPiece = self.currentlyClicked.currentPiece
 
-            opponentPieces = self.getPieceSet(capturedPiece.colorPrefix)
-            capturedPiecesObj = self.getCapturedMargin(self.currentlyClicked.currentPiece.colorPrefix)
+        movedPiece.moveset.setTileValidMove(False)
+        self.game.movePiece(self.currentlyClicked, (rowNum, colNum))
+        self.toggleClickAttributes(self.currentlyClicked)
+        movedPiece.moveset.updatePosition((movedPiece.xIndex, movedPiece.yIndex))
 
-            opponentPieces.pop(opponentPieces.index(capturedPiece))
-            tileContainingPawn.currentPiece = None
-            capturedPiecesObj.addCapturedPiece(capturedPiece)
+        if movedPiece.name == "pawn":
+            # TODO bug: protected promotion pieces:
+            #   1. king captures promoted pawn
+            #   2. bishop previously protecting pawn captures king
+            #   3. ??
+            self.checkPromotion(movedPiece)
+
+    def postMovementUpdates(self):
+        """
+        Updates required due to a movement: movesets, check status, and finally switching turns.
+        If a check occurs, a forced king movement/sacrifice occurs for the next player's turn.
+        :return: None
+        """
+        opponentKing = (self.getPieceSet(self.game.opponentColor)).king
+        selfPieceSet = self.getPieceSet(self.game.currentColor)
+
+        self.setPieceMovesets()
+        self.game.updateCheckStatus(selfPieceSet, opponentKing)
+        self.game.alternateCurrentColor()
+
+        # Check immediately after turn change whether a check has occurred
+        if self.game.inCheck[self.game.currentColor]:
+            # Force a sacrifice or a king movement if the king is in check
+            self.game.currentlyInCheck(self.getPieceSet(self.game.currentColor),
+                                       self.getPieceSet(self.game.opponentColor))
+
+        self.game.verifyCheckBlockingMovesets(self.getPieceSet(self.game.currentColor).king)
 
     def getPieceSet(self, colorPrefix):
         if colorPrefix == "b_":
-            return self.blackPieces.pieces
+            return self.blackPieces
         elif colorPrefix == "w_":
-            return self.whitePieces.pieces
+            return self.whitePieces
         else:
             raise Exception("Invalid color prefix")
 
@@ -392,10 +443,17 @@ class ChessBoard:
         else:
             self.currentlyClicked = tile
 
-        tile.toggleColor()
+        tile.toggleClickColor()
         tile.clicked = not tile.clicked
 
+    def checkPromotion(self, movedPawn):
+        print(movedPawn.yIndex)
+        if (movedPawn.colorPrefix == "b_" and movedPawn.yIndex == 7) or \
+                (movedPawn.colorPrefix == "w_" and movedPawn.yIndex == 0):
+            self.promotionBoard = PromotionDisplay(movedPawn.colorPrefix, self.surface, movedPawn)
+
     def draw(self):
+
         for row in self.board:
             for tile in row:
                 tile.draw()
@@ -414,6 +472,10 @@ class ChessBoard:
         # deleteme
         self.surface.blit(self.testerImage, (pygame.mouse.get_pos()))
 
+        # Display game over message
+        if self.gameOver:
+            self.dispGameOver()
+
 
 class PieceSet:
     chessBoard = None
@@ -426,6 +488,7 @@ class PieceSet:
         self.directory = directory
         self.colorPrefix = colorPrefix
         self.pieces = []
+        self.king = None
 
         self.capturedPiecesMargin = CapturedPiecesMargin(marginTop, marginBottom - marginTop)
         CapturedPiecesMargin.setSurface(PieceSet.chessBoard.surface)
@@ -440,8 +503,6 @@ class PieceSet:
         :return: None
         """
         binaryPieces = ["rook", "knight", "bishop"]
-
-        ChessPiece.setMovesetObj(PieceSet.chessBoard)
 
         for pieceNum in range(8):
             pawnX = pieceNum
@@ -480,6 +541,7 @@ class PieceSet:
 
         self.pieces.append(queen)
         self.pieces.append(king)
+        self.king = king
 
     @staticmethod
     def getXEdgeIndices(sideIndex, pieceNum):
@@ -516,8 +578,6 @@ class PieceSet:
     def draw(self):
         for piece in self.pieces:
             tile = PieceSet.chessBoard.board[piece.xIndex][piece.yIndex]
-            tile.currentPiece = piece
-
             PieceSet.chessBoard.surface.blit(piece.image, self.getCenteredCoord(piece.image, tile))
         self.capturedPiecesMargin.draw()
 
@@ -569,25 +629,13 @@ class Tile:
         if self.validMove:
             Tile.surface.blit(Tile.validMoveImg, PieceSet.getCenteredCoord(Tile.validMoveImg, self))
 
-    def toggleColor(self):
+    def toggleClickColor(self):
         temp = self.color
         self.color = self.alternateColor
         self.alternateColor = temp
 
 
 class ChessPiece:
-    # deleteme cleanup
-    # gameObj = None
-    movesetObj = None
-
-    # @classmethod
-    # def setGameObj(cls, game):
-    #     cls.gameObj = game
-
-    @classmethod
-    def setMovesetObj(cls, chessBoardObj):
-        cls.movesetObj = MoveSets(chessBoardObj, ChessBoard.game)
-
     def __init__(self, name, num, imageDirStr, colorPrefix):
         self.name = name
         self.num = num
@@ -605,16 +653,31 @@ class ChessPiece:
     def setIndices(self, coord):
         self.xIndex, self.yIndex = coord
 
+        # Initialize moveset and location on first run
         if not self.startPos:
             self.startPos = coord
+            self.moveset = MoveSet(self)
 
-    def getCaptureMoveset(self):
-        return ChessPiece.movesetObj.getCaptureMoveset(self.name, self.colorPrefix, (self.xIndex, self.yIndex),
-                                       self.startPos, self.unMoved)
+        # Update the moveset object's ChessPiece index values
+        self.moveset.position = coord
+
+        # Update the tile that now contains the current self ChessPiece
+        tile = PieceSet.chessBoard.board[self.xIndex][self.yIndex]
+        tile.currentPiece = self
+
+    def setName(self, name):
+        self.name = name
+        self.moveset.pieceName = name
+
+    def setImage(self, image):
+        self.image = image
+
+    def setID(self, num):
+        self.num = num
+        self.moveset.id = num
 
     def getMoveSet(self):
-        ChessPiece.movesetObj.getMoves(self.name, self.colorPrefix, (self.xIndex, self.yIndex),
-                                       self.startPos, self.unMoved)
+        self.moveset.getMoves()
 
 
 main()

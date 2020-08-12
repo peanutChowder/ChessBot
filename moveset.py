@@ -1,4 +1,4 @@
-class MoveSets:
+class MoveSet:
     """
     Object that gets legal chess moves within the given piece's (via getMoves) position. Ultimately returns a list
     of tuples via a method of possible moves.
@@ -27,121 +27,158 @@ class MoveSets:
     :var self.position: tuple of the current piece's indices
     :var self.colorPrefix: string of the current piece's color prefix
     """
-    def __init__(self, chessBoard, gameObj):
-        """
-        :param chessBoard: ChessBoard object. Used to reference the Tile objects within ChessBoard.board
-        """
-        self.nonVerifiedMoves = {"up": [], "down": [], "left": [], "right": [],
-                                 "left-up": [], "right-up": [], "right-down": [], "left-down": []}
-        self.verifiedMoves = {"up": [], "down": [], "left": [], "right": [],
-                                 "left-up": [], "right-up": [], "right-down": [], "left-down": []}
-        self.chessBoard = chessBoard
-        self.gameObject = gameObj
-        self.pieceMovesets = {"pawn": self.pawn, "rook": self.rook, "knight": self.knight,
-                              "bishop": self.bishop, "queen": self.queen, "king": self.king}
-        self.pieceName = None
-        self.position = None
-        self.colorPrefix = None
-        self.startPos = None
-        self.unMoved = None
+    chessBoard = None
+    @classmethod
+    def setChessBoard(cls, board):
+        cls.chessBoard = board
 
-    def clearMovesets(self):
-        self.nonVerifiedMoves = {"up": [], "down": [], "left": [], "right": [],
+    def __init__(self, piece):
+        """
+
+        """
+        self.unverifiedMoveset = {"up": [], "down": [], "left": [], "right": [],
                                  "left-up": [], "right-up": [], "right-down": [], "left-down": []}
-        self.verifiedMoves = {"up": [], "down": [], "left": [], "right": [],
+
+        self.verifiedMoveset = {"up": [], "down": [], "left": [], "right": [],
+                                 "left-up": [], "right-up": [], "right-down": [], "left-down": []}
+        self.verifiedCaptureset = {"up": [], "down": [], "left": [], "right": [],
                               "left-up": [], "right-up": [], "right-down": [], "left-down": []}
 
-    def getMoves(self, name, colorPrefix, position, startPos, unMoved):
-        self.setNonVerifiedMoves(name, colorPrefix, position, startPos, unMoved)
+        self.pieceMovesets = {"pawn": self.pawn, "rook": self.rook, "knight": self.knight,
+                              "bishop": self.bishop, "queen": self.queen, "king": self.king}
+        self.protectedPieces = []
 
-        self.verifyMoveset()
+        self.pieceName = piece.name
+        self.position = (piece.xIndex, piece.yIndex)
+        self.colorPrefix = piece.colorPrefix
+        self.startPos = piece.startPos
+        self.unMoved = piece.unMoved
+        self.id = piece.num
 
-        self.setTileValidMove(True)
+        self.checkingKing = False
 
-    def setNonVerifiedMoves(self, name, colorPrefix, position, startPos, unMoved):
+    def __getitem__(self, key):
+        if key == "unverifiedMoveset":
+            return self.unverifiedMoveset
+        elif key == "verifiedMoveset":
+            return self.verifiedMoveset
+        else:
+            raise Exception("Invalid key provided for moveset getter")
+
+    def __str__(self):
+        return f"{self.colorPrefix}{self.pieceName}[{self.id}]"
+
+    def __len__(self):
+        length = 0
+        for key in self.verifiedMoveset:
+            length += len(self.verifiedMoveset[key])
+
+        return length
+
+    def getListifiedCaptureset(self):
         """
-        Helper function for getting verified moves. Sets the non verified moves for most pieces. Some pieces s/a
-        bishop, rook will be partially verified.
-        :param name: string name of the chess piece
-        :param colorPrefix: string prefix of the piece's color
-        :param position: tuple of the piece's indices on the board
-        :param startPos: bool of whether the piece has ever moved
+        Gets the list version of verifiedCaptureset. Move positions are no longer differentiated by quadrant and all kept
+        together.
+        :return: list of the verified moves
+        """
+        listVerifiedMoves = []
+
+        for key in self.verifiedCaptureset.keys():
+            listVerifiedMoves += self.verifiedCaptureset[key]
+
+        return listVerifiedMoves
+
+    def updatePosition(self, newPos):
+        """
+        Since the position is passed by value in __init__, we must call this method after every successful piece move
         :return: None
         """
-        assert name in self.pieceMovesets, "The string name of the given piece was not found in the moveset dictionary."
+        self.position = newPos
 
-        self.pieceName = name
-        self.position = position
-        self.colorPrefix = colorPrefix
-        self.startPos = startPos
-        self.unMoved = unMoved
+    def clearUnverifiedMoveset(self):
+        self.unverifiedMoveset = {"up": [], "down": [], "left": [], "right": [],
+                                  "left-up": [], "right-up": [], "right-down": [], "left-down": []}
 
-        self.pieceMovesets[name]()
+    def clearMovesets(self):
+        """
+        Clears all sets for the next use. Prevents double-appending sets to the moveset dicts.
+        :return: None
+        """
+        self.unverifiedMoveset = {"up": [], "down": [], "left": [], "right": [],
+                                 "left-up": [], "right-up": [], "right-down": [], "left-down": []}
+        self.verifiedMoveset = {"up": [], "down": [], "left": [], "right": [],
+                              "left-up": [], "right-up": [], "right-down": [], "left-down": []}
+        self.verifiedCaptureset = {"up": [], "down": [], "left": [], "right": [],
+                              "left-up": [], "right-up": [], "right-down": [], "left-down": []}
+        self.protectedPieces = []
+
+    def getMoves(self):
+        print(" ========================================================\n"
+              "                      NAME: ", self.pieceName)
+        self.clearMovesets()
+
+        self.setUnverifiedMoveset()
+        self.verifyMoveset()
+        self.setCaptureset()
+
+        print(f"getMoves called on ======================================{self}:\n"
+              f"    verified: {self.verifiedMoveset}\n"
+              f"    protected: {self.protectedPieces}\n"
+              f"    capture: {self.verifiedCaptureset}")
+
+
+    def setUnverifiedMoveset(self):
+        self.pieceMovesets[self.pieceName]()
 
     def setTileValidMove(self, value):
         """
-        Sets the value of each index within self.verifiedMoves by retrieving the tile associated with the index and
+        Sets the value of each index within self.verifiedMoveset by retrieving the tile associated with the index and
         setting its value.
-        Additionally calls another method to clear self.verifiedMoves and self.nonVerifiedMoves if value is False. It is
+        Additionally calls another method to clear self.verifiedMoveset and self.nonVerifiedMoves if value is False. It is
         assumed that if all valid moves are to be reset, so should the moveset lists.
         :param value: bool of the desired value
         :return: None
         """
         assert type(value) == bool
 
-        for quadrant in self.verifiedMoves.keys():
-            for indexTuple in self.verifiedMoves[quadrant]:
+        for quadrant in self.verifiedMoveset.keys():
+            for indexTuple in self.verifiedMoveset[quadrant]:
                 self.chessBoard.board[indexTuple[0]][indexTuple[1]].validMove = value
 
-        if not value:
-            self.clearMovesets()
-
-    def getCaptureMoveset(self, name, colorPrefix, position, startPos, unMoved):
-        """
-        Sister function of getMoves. Uses self.nonVerifiedMoves temporarily but calls self.setTileValidMove(False) to
-        clear the moveset lists. Returns a list of capture moves for external handling (Refer to Game object)
-
-            Criterion for capture moves:
-            - Any tile (empty or occupied regardless of color) that an opposing piece could occupy within the current
-            turn AND the current piece could capture the next turn
-
-        e.g. A rook immediately left to a self-color pawn will have a dict that recognizes the pawn as a valid move.
-        This is to capture the possibility that the enemy king takes the pawn, and immediately becomes in check.
-        :return:
-        """
-        captureMoveset = {"up": [], "down": [], "left": [], "right": [],
-                          "left-up": [], "right-up": [], "right-down": [], "left-down": []}
-        self.setNonVerifiedMoves(name, colorPrefix, position, startPos, unMoved)
-
-        for quadrant in self.nonVerifiedMoves.keys():
-            for tuplePosition in self.nonVerifiedMoves[quadrant]:
+    def setCaptureset(self):
+        for quadrant in self.unverifiedMoveset.keys():
+            for tuplePosition in self.unverifiedMoveset[quadrant]:
                 if self.withinBoardBoundaries(tuplePosition):
 
-                    # Catch and discard pawn forward movements
+                    # Fwd/bckwrd pawn movements are not possible captures
                     if self.pieceName == "pawn" and (quadrant == "up" or quadrant == "down"):
                         pass
 
-                    # Identical to verifyMoveset. Stop appending after piece reaches opposing piece
+                    # End movement as soon as a piece captures opponent piece
                     elif self.tileOccupiedByOpponent(tuplePosition) and not self.pieceName == "knight":
-                        captureMoveset[quadrant].append(tuplePosition)
-                        break
+                        self.verifiedCaptureset[quadrant].append(tuplePosition)
 
-                    # Pieces can move onto a tile occupied by their color but not past it. Identical to above elif
+                        # Set capturesets to go through king opponent pieces
+                        if self.chessBoard.board[tuplePosition[0]][tuplePosition[1]].currentPiece.name != "king":
+                            break
+                        else:
+                            king = self.chessBoard.board[tuplePosition[0]][tuplePosition[1]].currentPiece
+                            if king.colorPrefix == self.colorPrefix:
+                                break
+
+                    # Pieces cannot move onto or through a piece containing their own color. However these pieces are
+                    # protected
                     elif self.tileOccupiedBySelf(tuplePosition) and not self.pieceName == "knight":
-                        captureMoveset[quadrant].append(tuplePosition)
+                        self.verifiedCaptureset[quadrant].append(tuplePosition)
                         break
 
-                    # Append move if tile is unoccupied
+                    # Check if each tile is not occupied by self
                     elif not self.tileOccupiedBySelf(tuplePosition):
-                        captureMoveset[quadrant].append(tuplePosition)
-
-        self.setTileValidMove(False)
-        return captureMoveset
-
+                        self.verifiedCaptureset[quadrant].append(tuplePosition)
 
     def verifyMoveset(self):
         """
-        Appends all verified moves from self.nonVerifiedMoves to self.verifiedMoves. Verification is in terms of
+        Appends all verified moves from self.unverifiedMoveset to self.verifiedMoveset. Verification is in terms of
         movement only, turn-based moves are not verified (e.g. en passant can still be performed even if opponent took
         double step two turns ago). Endgame conditions are also not verified (check/checkmate/stalemate).
         Moves are categorized by quadrant direction. Knight movements are considered diagonal.
@@ -151,8 +188,8 @@ class MoveSets:
             # Check if castling is possible. If so, call the method that appends the moves
             self.castlingValid()
 
-        for quadrant in self.nonVerifiedMoves.keys():
-            for tuplePosition in self.nonVerifiedMoves[quadrant]:
+        for quadrant in self.unverifiedMoveset.keys():
+            for tuplePosition in self.unverifiedMoveset[quadrant]:
                 if self.withinBoardBoundaries(tuplePosition):
 
                     # Handle pawn forward and diagonal movement w.r.t. opponent pieces, IGNORE self pieces
@@ -161,29 +198,18 @@ class MoveSets:
 
                     # End movement as soon as a piece captures opponent piece
                     elif self.tileOccupiedByOpponent(tuplePosition) and not self.pieceName == "knight":
-                        self.verifiedMoves[quadrant].append(tuplePosition)
+                        self.verifiedMoveset[quadrant].append(tuplePosition)
                         break
 
-                    # Pieces cannot move onto or past a piece containing their own color. Exception: knight can move over
+                    # Pieces cannot move onto or through a piece containing their own color. However these pieces are
+                    # protected
                     elif self.tileOccupiedBySelf(tuplePosition) and not self.pieceName == "knight":
+                        self.protectedPieces.append(tuplePosition)
                         break
 
                     # Check if each tile is not occupied by self
                     elif not self.tileOccupiedBySelf(tuplePosition):
-                        self.verifiedMoves[quadrant].append(tuplePosition)
-
-    def checkTileInCheck(self, tuplePosition):
-        """
-        Checks if an otherwise valid by the king could leave him in check. Only meant to be called for king pieces.
-        :param tuplePosition: tuple of the tile to check
-        :return: bool of whether or not the given tuple would leave the king in check
-        """
-        assert self.pieceName == "king", "Method should only be called on the king piece"
-
-        if tuplePosition in self.gameObject.bothCaptureMovesets[self.gameObject.opponentColor]:
-            return True
-        else:
-            return False
+                        self.verifiedMoveset[quadrant].append(tuplePosition)
 
     def pawnOpponentVerification(self, pos, quadrant):
         """
@@ -209,21 +235,21 @@ class MoveSets:
             elif abs(pos[1] - self.position[1]) == 2:
                 if self.colorPrefix == "b_":
                     if not self.chessBoard.board[pos[0]][pos[1] - 1].currentPiece:
-                        self.verifiedMoves[quadrant].append(pos)
+                        self.verifiedMoveset[quadrant].append(pos)
 
                 elif self.colorPrefix == "w_":
                     if not self.chessBoard.board[pos[0]][pos[1] + 1].currentPiece:
-                        self.verifiedMoves[quadrant].append(pos)
+                        self.verifiedMoveset[quadrant].append(pos)
 
             else:
-                self.verifiedMoves[quadrant].append(pos)
+                self.verifiedMoveset[quadrant].append(pos)
 
         # Append diagonal indices that contain opponent pieces
         elif possiblePiece:
-            self.verifiedMoves[quadrant].append(pos)
+            self.verifiedMoveset[quadrant].append(pos)
 
         elif self.enPassantValid(pos):
-            self.verifiedMoves[quadrant].append(pos)
+            self.verifiedMoveset[quadrant].append(pos)
 
     def enPassantValid(self, pos):
         """
@@ -237,17 +263,20 @@ class MoveSets:
             adjacentTilePos = (pos[0], pos[1] + 1)
             adjacentPiece = self.chessBoard.board[adjacentTilePos[0]][adjacentTilePos[1]].currentPiece
 
+            # Allow en passant if an opponent pawn is adjacent (left/right) and they have just performed a double step
             if self.tileOccupiedByOpponent(adjacentTilePos) and adjacentPiece.xIndex == adjacentPiece.startPos[0] \
-                    and adjacentPiece.name == "pawn":
+                    and adjacentPiece.name == "pawn" and self.chessBoard.game.recentDoublestep == adjacentPiece:
                 return True
 
         elif self.colorPrefix == "b_" and self.position[1] == 4:
             adjacentTilePos = (pos[0], pos[1] - 1)
             adjacentPiece = self.chessBoard.board[adjacentTilePos[0]][adjacentTilePos[1]].currentPiece
 
+            # Allow en passant if an opponent pawn is adjacent (left/right) and they have just performed a double step
             if self.tileOccupiedByOpponent(adjacentTilePos) and adjacentPiece.xIndex == adjacentPiece.startPos[0] \
-                    and adjacentPiece.name == "pawn":
+                    and adjacentPiece.name == "pawn" and self.chessBoard.game.recentDoublestep == adjacentPiece:
                 return True
+
         return False
 
     def castlingValid(self):
@@ -282,14 +311,14 @@ class MoveSets:
 
     def appendCastling(self, rookPiece):
         if rookPiece.xIndex == 0:
-            self.verifiedMoves["left"].append((2, self.position[1]))
+            self.verifiedMoveset["left"].append((2, self.position[1]))
         elif rookPiece.xIndex == 7:
-            self.verifiedMoves["right"].append((6, self.position[1]))
+            self.verifiedMoveset["right"].append((6, self.position[1]))
 
     def tileOccupiedBySelf(self, pos):
         """
         Step 2.a verification. Ensures that the given tile indices are not already occupied by a friendly piece.
-        :param pos: tuple of indices X, Y for the chessBoard.board list
+        :param pos: tuple of indices X, Y for the chessBoard.board list`
         :return: boolean of whether the given tile indices are occupied by a friendly piece
         """
         chessPiece = self.chessBoard.board[pos[0]][pos[1]].currentPiece
@@ -351,14 +380,14 @@ class MoveSets:
 
         # Appends forward position
         forwardSquareY = self.position[1] + incrementDirection
-        self.nonVerifiedMoves[strDirection].append((self.position[0], forwardSquareY))
+        self.unverifiedMoveset[strDirection].append((self.position[0], forwardSquareY))
         # Append double step
         if self.position == self.startPos:
-            self.nonVerifiedMoves[strDirection].append((self.position[0], forwardSquareY + incrementDirection))
+            self.unverifiedMoveset[strDirection].append((self.position[0], forwardSquareY + incrementDirection))
 
         # Appends the diagonal positions the pawn could possibly take
-        self.nonVerifiedMoves[f"left-{strDirection}"].append((self.position[0] - 1, forwardSquareY))
-        self.nonVerifiedMoves[f"right-{strDirection}"].append((self.position[0] + 1, forwardSquareY))
+        self.unverifiedMoveset[f"left-{strDirection}"].append((self.position[0] - 1, forwardSquareY))
+        self.unverifiedMoveset[f"right-{strDirection}"].append((self.position[0] + 1, forwardSquareY))
 
     def rook(self):
         """
@@ -372,19 +401,18 @@ class MoveSets:
         rightIterable = range(self.position[0] + 1, 8)
 
         for leftX in leftIterable:
-            self.nonVerifiedMoves["left"].append((leftX, self.position[1]))
+            self.unverifiedMoveset["left"].append((leftX, self.position[1]))
         for rightX in rightIterable:
-            self.nonVerifiedMoves["right"].append((rightX, self.position[1]))
+            self.unverifiedMoveset["right"].append((rightX, self.position[1]))
 
         # Appending the vertical moves
         upIterable = range(self.position[1] - 1, -1, -1)
         downIterable = range(self.position[1] + 1, 8)
 
         for upY in upIterable:
-            self.nonVerifiedMoves["up"].append((self.position[0], upY))
+            self.unverifiedMoveset["up"].append((self.position[0], upY))
         for downY in downIterable:
-            self.nonVerifiedMoves["down"].append((self.position[0], downY))
-
+            self.unverifiedMoveset["down"].append((self.position[0], downY))
 
     def knight(self):
         """
@@ -401,7 +429,7 @@ class MoveSets:
 
         for quadrant, quadrantName in zip(offsetDirections, directionNames):
             for move in quadrant:
-                self.nonVerifiedMoves[quadrantName].append((currentX + move[0], currentY + move[1]))
+                self.unverifiedMoveset[quadrantName].append((currentX + move[0], currentY + move[1]))
 
     def bishop(self):
         """
@@ -413,16 +441,16 @@ class MoveSets:
         currentY = self.position[1]
 
         for x, y in zip(range(currentX - 1, -1, -1), range(currentY - 1, -1, -1)):
-            self.nonVerifiedMoves["left-up"].append((x, y))
+            self.unverifiedMoveset["left-up"].append((x, y))
 
         for x, y in zip(range(currentX + 1, 8), range(currentY + 1, 8)):
-            self.nonVerifiedMoves["right-down"].append((x, y))
+            self.unverifiedMoveset["right-down"].append((x, y))
 
         for x, y in zip(range(currentX + 1, 8), range(currentY - 1, -1, -1)):
-            self.nonVerifiedMoves["right-up"].append((x, y))
+            self.unverifiedMoveset["right-up"].append((x, y))
 
         for x, y in zip(range(currentX - 1, -1, -1), range(currentY + 1, 8)):
-            self.nonVerifiedMoves["left-down"].append((x, y))
+            self.unverifiedMoveset["left-down"].append((x, y))
 
     def queen(self):
         """
@@ -447,4 +475,4 @@ class MoveSets:
                          "right", "right-down", "down", "left-down"]
 
         for move, moveQuadrant in zip(quadrantMoves, quadrantNames):
-            self.nonVerifiedMoves[moveQuadrant].append(move)
+            self.unverifiedMoveset[moveQuadrant].append(move)
