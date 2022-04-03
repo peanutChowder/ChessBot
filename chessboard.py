@@ -1,7 +1,16 @@
+"""
+TODO: bug list
+    1. Create minimax algorithm
+    2. Create a more generalized getMove, that can take player vs player, bot vs player, etc.
+"""
 import pygame
 from chessGame import Game
 from chessGame import MoveSet
 
+from ChessBrain import ChessBrain
+
+# deleteme
+import time
 
 def main():
     pygame.init()
@@ -24,6 +33,50 @@ def alternator(current, optionsList):
             return option
 
 
+class Player:
+    chessBoard = None
+    currentPlayer = None
+
+    @classmethod
+    def setChessBoard(cls, chessboard):
+        Player.chessBoard = chessboard
+
+    @classmethod
+    def changeTurn(cls):
+        if cls.currentPlayer == "w_":
+            cls.currentPlayer = "b_"
+        else:
+            cls.currentPlayer = "w_"
+
+    def __init__(self, isBot, pieceSet):
+        self.isBot = isBot
+        self.pieceSet = pieceSet
+
+        if isBot:
+            self.getMoveMethod = Player.chessBoard.getBotMove
+            # deleteme
+            # DeepCopy.setChessPieceClass(ChessPiece)
+            # DeepCopy.setMoveSetClass(MoveSet)
+            self.brain = ChessBrain(Player.chessBoard, pieceSet)
+        else:
+            self.getMoveMethod = Player.chessBoard.handleHumanClick
+
+    def getMove(self, event):
+        if self.isBot:
+            if self.chessBoard.promotionBoard:
+                self.getMoveMethod(self.brain.getMove(), self.getPromotionSelection())
+            else:
+                self.getMoveMethod(self.brain.getMove())
+
+        elif not self.isBot and event.type == pygame.MOUSEBUTTONUP:
+            self.getMoveMethod(pygame.mouse.get_pos())
+
+    def getPromotionSelection(self):
+        assert self.isBot, "Promotion selection method call for bot called on non-bot player"
+
+        return self.brain.getPromotionChoice()
+
+
 class ChessWindow:
     def __init__(self, surface):
         self.surface = surface
@@ -36,6 +89,16 @@ class ChessWindow:
         self.boardMargin = 0.15   # Percent height a single margin takes up
         self.chessBoard = None
         self.createBoard()
+
+        # Set whether each player is a human or a bot
+        Player.setChessBoard(self.chessBoard)
+        Player.currentPlayer = "w_"
+
+        # The booleans below indicate whether the player is a bot. i.e. True = bot
+        self.players = {"w_": Player(False, self.chessBoard.whitePieces),
+                        "b_": Player(True, self.chessBoard.blackPieces)}
+        self.turnStartTime = time.time()
+        self.botDelay = 0
 
     def createBoard(self):
         """
@@ -63,15 +126,22 @@ class ChessWindow:
         Handles all user-generated events, i.e. clicking.
         :return: None
         """
+        # bots move independently of pygame events so it is called outside of event loop
+        if self.players[Player.currentPlayer].isBot and \
+                (time.time() - self.turnStartTime) > self.botDelay and \
+                not self.chessBoard.gameOver:
+            # reset timer to induce artificial delay
+            self.turnStartTime = time.time()
+            self.players[Player.currentPlayer].getMove(None)
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self.close = True
 
-            if event.type == pygame.MOUSEBUTTONUP:
-                self.chessBoard.checkBoardClick(pygame.mouse.get_pos())
-
-                # deleteme
-                print("click: ", pygame.mouse.get_pos())
+            # Handle human players
+            if not self.players[Player.currentPlayer].isBot and \
+                    not self.chessBoard.gameOver:
+                self.players[Player.currentPlayer].getMove(event)
 
     def draw(self):
         """
@@ -91,6 +161,8 @@ class PromotionDisplay:
     This object handles promotion within itself. All promoted pieces are assigned a unique negative id/number. Following
     promotion the instance is thrown to the garbage collector implicitly.
     """
+    promotedPieceID = -1
+
     def __init__(self, colorPrefix, surface, promotionPiece):
         """
         :param colorPrefix: str of the pawn's color
@@ -111,8 +183,6 @@ class PromotionDisplay:
         self.textFont = pygame.font.SysFont("arial", 20)
         self.textSurface = self.textFont.render("Select a piece to promote to", False, (0, 0, 0))
 
-        self.promotedPieceID = -1
-
         self.windowBackground = pygame.Rect(self.x, self.y, self.width, self.height)
         self.promotionOptionList = []
         self.initPromotionOptions()
@@ -130,13 +200,13 @@ class PromotionDisplay:
         for optionIndex in range(len(strOptions)):
             tile = Tile(x * optionIndex + padding + self.x, y + self.y, pygame.Color(255, 255, 255))
             tile.currentPiece = ChessPiece(strOptions[optionIndex],
-                                           self.promotedPieceID,
+                                           PromotionDisplay.promotedPieceID,
                                            f"{self.colorDirectory}/{self.colorPrefix}{strOptions[optionIndex]}.png",
                                            self.colorPrefix)
             self.promotionOptionList.append(tile)
 
             # ensures every init'd piece on the board has a unique id-name pair
-            self.promotedPieceID -= 1
+            PromotionDisplay.promotedPieceID -= 1
 
     def draw(self):
         """
@@ -150,6 +220,10 @@ class PromotionDisplay:
             self.surface.blit(piece.image, PieceSet.getCenteredCoord(piece.image, tile))
 
         self.surface.blit(self.textSurface, (self.x + 40, self.y + (self.height - 30)))
+
+    def getBotPromotionSelection(self, pieceIndex):
+        selectedPiece = self.promotionOptionList[pieceIndex].currentPiece
+        self.promotePiece(selectedPiece.name, selectedPiece.image, selectedPiece.num)
 
     def getPromotionSelection(self, mouseCoords):
         """
@@ -247,7 +321,6 @@ class ChessBoard:
         self.currentlyClicked = None
 
         # Piece specific attributes/methods
-        MoveSet.setChessBoard(self)
         self.whitePieces = None
         self.blackPieces = None
         self.createPieces()
@@ -258,11 +331,11 @@ class ChessBoard:
         # Game flow specific attributes/methods
         self.game = Game(self)
         self.setPieceMovesets()
+        self.recentMoveTiles = []
 
         # deleteme
         self.testerImage = pygame.image.load("tester-img.png")
         self.testerImage = pygame.transform.scale(self.testerImage, (30, 30))
-        self.moveCount = 0
 
     def createPieces(self):
         blackPiecePrefix = "b_"
@@ -306,66 +379,66 @@ class ChessBoard:
         y = self.surface.get_height() / 2 - (textSurface.get_height() / 2)
         self.surface.blit(textSurface, (x, y))
 
-    def getPlayerMove(self, mouseCoords):
-        pass
+    def getBotMove(self, pieceInfoTuple, promotionSelection = None):
+        piece = pieceInfoTuple[0]
+        rowNum = pieceInfoTuple[1]
+        colNum = pieceInfoTuple[2]
 
-    def checkBoardClick(self, mouseCoords):
-        if self.gameOver:
-            pass
-        elif self.promotionBoard:
-            selection = self.promotionBoard.getPromotionSelection(mouseCoords)
-            if selection:
-                self.game.alternateCurrentColor()
-                self.postMovementUpdates()
+        if not self.gameOver:
+            if self.promotionBoard:
+                self.promotionBoard.getBotPromotionSelection(promotionSelection)
+
                 self.promotionBoard = None
+                self.postMovementUpdates()
 
-        # Tiles do not react to clicks while the promotion board is open
-        else:
-            # Check legality of moves and endgame conditions
-            self.preMovementUpdates()
+            else:
+                self.toggleClickAttributes(self.board[piece.xIndex][piece.yIndex])
+                self.currentlyClicked.currentPiece.moveset.setTileValidMove(True)
 
-            for rowNum in range(len(self.board)):
-                for colNum in range(len(self.board[rowNum])):
-                    tile = self.board[rowNum][colNum]
+                tile = self.board[rowNum][colNum]
 
-                    # check if the tile has been clicked
-                    if tile.rect.collidepoint(mouseCoords):
-                        # Nothing is currently selected and the clicked tile contains a piece of the current color
-                        if tile.currentPiece and not self.currentlyClicked \
-                                and tile.currentPiece.colorPrefix == self.game.currentColor:
-                            self.toggleClickAttributes(tile)
-                            tile.currentPiece.moveset.setTileValidMove(True)
+                self.movementUpdates(tile, rowNum, colNum)
+                self.postMovementUpdates()
 
-                        # A tile with a piece is currently selected and the user deselects it by re-clicking it
-                        elif tile == self.currentlyClicked:
-                            self.currentlyClicked.currentPiece.moveset.setTileValidMove(False)
-                            self.toggleClickAttributes(tile)
+    def handleHumanClick(self, mouseCoords):
+        if not self.gameOver:
+            if self.promotionBoard:
+                selection = self.promotionBoard.getPromotionSelection(mouseCoords)
+                if selection:
+                    # leftoff here. debug the chess game itself using the two bots' randomized moves. there is a weird
+                    #   assertion error
+                    # TODO: testing player turn changing
+                    self.promotionBoard = None
+                    self.postMovementUpdates()
 
-                        # Move the currently selected piece to the new tile
-                        elif self.currentlyClicked and tile.validMove:
-                            print(f"============={self.currentlyClicked.currentPiece.name} has moved")  # Diagnostic
 
-                            # Handle all piece movements (capturing, check, etc.)
-                            self.movementUpdates(tile, rowNum, colNum)
+            # Tiles do not react to clicks while the promotion board is open
+            else:
 
-                            # Handle post-move related attributes/events (e.g. movesets, check, changing turn...)
-                            self.postMovementUpdates()
+                for rowNum in range(len(self.board)):
+                    for colNum in range(len(self.board[rowNum])):
+                        tile = self.board[rowNum][colNum]
 
-    def preMovementUpdates(self):
-        """
-        Wrapper method containing the necessary methods to be called before a turn begins. Checks endgame conditions,
-        and re-verifies the king's moveset to ensure king captures do not occur.
-        :return: None
-        """
-        # Remove any moves that could leave the king in check
-        self.game.kingCheckVerification(self.getPieceSet(self.game.currentColor).king,
-                                        self.getPieceSet(self.game.opponentColor))
+                        # check if the tile has been clicked
+                        if tile.rect.collidepoint(mouseCoords):
+                            # Nothing is currently selected and the clicked tile contains a piece of the current color
+                            if tile.currentPiece and not self.currentlyClicked \
+                                    and tile.currentPiece.colorPrefix == self.game.currentColor:
+                                self.toggleClickAttributes(tile)
+                                tile.currentPiece.moveset.setTileValidMove(True)
 
-        # Update and check whether the current player has any legal moves
-        self.game.checkLegalMoveExists(self.getPieceSet(self.game.currentColor))
+                            # A tile with a piece is currently selected and the user deselects it by re-clicking it
+                            elif tile == self.currentlyClicked:
+                                self.currentlyClicked.currentPiece.moveset.setTileValidMove(False)
+                                self.toggleClickAttributes(tile)
 
-        # Check whether the game has ended (stalemate / checkmate)
-        self.gameOver = self.game.checkGameOver()
+                            # Move the currently selected piece to the new tile
+                            elif self.currentlyClicked and tile.validMove:
+                                # Handle all piece movements (capturing, check, etc.)
+                                self.movementUpdates(tile, rowNum, colNum)
+
+                                # Handle post-move related attributes/events (e.g. movesets, check, changing turn...)
+                                self.postMovementUpdates()
 
     def movementUpdates(self, tile, rowNum, colNum):
         """
@@ -376,6 +449,8 @@ class ChessBoard:
         :param colNum: int index of the tile's col
         :return: None
         """
+        print(f"\n\n============={self.currentlyClicked.currentPiece.name} has moved")  # Diagnostic
+
         # If the valid new tile contains an opposing piece, capture it
         if tile.currentPiece:
             self.game.capturePiece(tile)
@@ -389,6 +464,8 @@ class ChessBoard:
         movedPiece = self.currentlyClicked.currentPiece
 
         movedPiece.moveset.setTileValidMove(False)
+
+        self.toggleTileRecentMove([self.currentlyClicked, tile])
         self.game.movePiece(self.currentlyClicked, (rowNum, colNum))
         self.toggleClickAttributes(self.currentlyClicked)
         movedPiece.moveset.updatePosition((movedPiece.xIndex, movedPiece.yIndex))
@@ -411,7 +488,11 @@ class ChessBoard:
 
         self.setPieceMovesets()
         self.game.updateCheckStatus(selfPieceSet, opponentKing)
-        self.game.alternateCurrentColor()
+
+        # TODO: testing player change turns
+        if not self.promotionBoard:
+            self.game.alternateCurrentColor()
+            Player.changeTurn()
 
         # Check immediately after turn change whether a check has occurred
         if self.game.inCheck[self.game.currentColor]:
@@ -420,6 +501,33 @@ class ChessBoard:
                                        self.getPieceSet(self.game.opponentColor))
 
         self.game.verifyCheckBlockingMovesets(self.getPieceSet(self.game.currentColor).king)
+
+        # Remove any moves that could leave the king in check
+        self.game.preventKingCapture(self.getPieceSet(self.game.currentColor).king,
+                                     self.getPieceSet(self.game.opponentColor))
+
+        # Update and check whether the current player has any legal moves
+        self.game.checkLegalMoveExists(self.getPieceSet(self.game.currentColor))
+
+        # Check whether the game has ended (stalemate / checkmate)
+        self.gameOver = self.game.checkGameOver()
+
+    def toggleTileRecentMove(self, tileList):
+        """
+        Sets the current recentMoveTiles' recentMove to false and clears the attribute. Then appends the provided
+        list of tiles to recentMoveTiles and sets their recentMove attributes to true.
+        Ultimately toggles the color that indicates which tiles have been moved from/to in a recent move.
+        :param tileList:
+        :return:
+        """
+        for tile in self.recentMoveTiles:
+            tile.recentMove = False
+
+        self.recentMoveTiles = []
+
+        for tile in tileList:
+            tile.recentMove = True
+            self.recentMoveTiles.append(tile)
 
     def getPieceSet(self, colorPrefix):
         if colorPrefix == "b_":
@@ -616,8 +724,16 @@ class Tile:
         self.clicked = False
         self.validMove = False
 
+        # Attributes to highlight the most recent move
+        self.recentMove = False
+        self.recentMoveColor = pygame.Color(204, 255, 204)
+
     def draw(self):
-        pygame.draw.rect(Tile.surface, self.color, self.rect)
+        # Override other colors if the tile was used in a recent move
+        if self.recentMove:
+            pygame.draw.rect(Tile.surface, self.recentMoveColor, self.rect)
+        else:
+            pygame.draw.rect(Tile.surface, self.color, self.rect)
 
     def drawValidMove(self):
         """
@@ -648,6 +764,8 @@ class ChessPiece:
         self.startPos = None
         self.unMoved = True
 
+        self.captured = False
+
         self.moveset = None
 
     def setIndices(self, coord):
@@ -656,7 +774,7 @@ class ChessPiece:
         # Initialize moveset and location on first run
         if not self.startPos:
             self.startPos = coord
-            self.moveset = MoveSet(self)
+            self.moveset = MoveSet(self, PieceSet.chessBoard)
 
         # Update the moveset object's ChessPiece index values
         self.moveset.position = coord

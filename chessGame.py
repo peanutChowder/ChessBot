@@ -3,13 +3,15 @@ from moveset import MoveSet
 
 class Game:
     """
-    The game object handles chess in a game-ending orientation, i.e. checkmate, checks, etc. Additionally handles turn-
+    The game object handles chess in a game-ending orientation, i.e. checkma`te, checks, etc. Additionally handles turn-
     based aspects of movements, s/a pawn diagonal capturing and other nuanced conditional movements.
     :var self.chessBoard: ChessBoard object
     :var self.currentColor: str representation of the current turn
     :var self.opponentColor: str representation of the other player
     :var self.inCheck: dict of two bool values. Represents whether either player's king is in check.
     """
+    diagnostic = False
+
     def __init__(self, board):
         self.chessBoard = board
         self.currentColor = "w_"
@@ -21,11 +23,16 @@ class Game:
 
         self.kingStuck = False
         self.legalMoveExists = False
+        self.turnsSinceCapture = 0
 
     def alternateCurrentColor(self):
         temp = self.currentColor
         self.currentColor = self.opponentColor
         self.opponentColor = temp
+
+        self.turnsSinceCapture += 1
+        if Game.diagnostic:
+            print(f"[[[[[[[[[[[[[[[[[[[[[[[[[[[[{self.turnsSinceCapture}]]]]]]]]]]]]]]]]]")
 
     @staticmethod
     def movePiece(oldTile, newTileIndices):
@@ -68,7 +75,8 @@ class Game:
         """
         checkPieceList = Game.getCheckPieces(opponentPieceSet)
 
-        print("CHECK PIECES:", [checkPiece.name for checkPiece in checkPieceList])
+        if Game.diagnostic:
+            print("CHECK PIECES:", [checkPiece.name for checkPiece in checkPieceList])
         for checkPiece in checkPieceList:
             checkPieceObj = CheckPiece(checkPiece, selfPieceSet.king)
             for piece in selfPieceSet.pieces:
@@ -85,13 +93,19 @@ class Game:
         return checkPieces
 
     def checkGameOver(self):
-        if self.kingStuck:
+        # King must be trapped and not during promotion
+        if self.kingStuck and not self.chessBoard.promotionBoard:
             if self.inCheck[self.currentColor] and not self.legalMoveExists:
                 return "CHECKMATE"
             elif not self.legalMoveExists:
                 return "STALEMATE"
 
-    def kingCheckVerification(self, king, opponentPieceSet):
+        # 50 move rule
+        # deleteme temp changed for testing
+        if self.turnsSinceCapture > 100:
+            return "DRAW"
+
+    def preventKingCapture(self, king, opponentPieceSet):
         """
         Update the king's moveset to avoid any moves that could leave him in check. Works proactively and reactively,
         i.e. can be called while king is in check as well as called prior.
@@ -99,6 +113,10 @@ class Game:
         :param opponentPieceSet: PieceSet object of the opponent
         :return: None
         """
+        if Game.diagnostic:
+            print(f"\n********************preventKingCapture*************** kingColor{king.colorPrefix} "
+                    f"**********************\n")
+
         for quadrantKey in king.moveset.verifiedMoveset.keys():
             updatedQuadrant = []
 
@@ -110,26 +128,43 @@ class Game:
                     opponentPieceCaptureset = opponentPieceSet.pieces[index].moveset.getListifiedCaptureset()
                     protectedPositions = opponentPieceSet.pieces[index].moveset.protectedPieces
 
-                    # Does not append king moves that can be found by
+                    if Game.diagnostic:
+                        print("King move:", move)
+                        print(f"Opponent captureset and protectedpos for {opponentPieceSet.pieces[index].moveset}:")
+                        print(opponentPieceCaptureset)
+                        print(protectedPositions, "\n")
+
+                    # Does not append moves that could result in the king being captured
                     if move in opponentPieceCaptureset or move in protectedPositions:
                         legalMove = False
+                        break
                     index += 1
 
-                if not legalMove and abs(move[0] - king.xIndex) == 1:
-                    # If the king cannot move to its immediate left/right, prevent castling
-                    updatedQuadrant = []
+                if not legalMove:
+                    if Game.diagnostic:
+                        print("======DISCARDED====\n")
+
+                    if abs(move[0] - king.xIndex) == 1:
+                        # If the king cannot move to its immediate left/right, prevent castling
+                        updatedQuadrant = []
                     break
                 elif legalMove:
+                    if Game.diagnostic:
+                        print("======APPENDED====\n")
+
                     updatedQuadrant.append(move)
 
             # Assign the newly created list of quadrant moves
             king.moveset.verifiedMoveset[quadrantKey] = updatedQuadrant
 
-            # Label the king as stuck if it has no legal moves to take
-            if len(king.moveset):
-                self.kingStuck = False
-            else:
-                self.kingStuck = True
+        # Label the king as stuck if it has no legal moves to take
+        if len(king.moveset):
+            self.kingStuck = False
+        else:
+            self.kingStuck = True
+
+        if Game.diagnostic:
+            print("*********************************************************************\n")
 
     def updateCheckStatus(self, selfPieceset, opponentKing):
         """
@@ -149,7 +184,9 @@ class Game:
             if (opponentKing.xIndex, opponentKing.yIndex) in pieceMoveset:
                 checkStatus = True
                 selfPieceset.pieces[index].moveset.checkingKing = True
-                print(f"{self.opponentColor} is now in check")
+
+                if Game.diagnostic:
+                    print(f"{self.opponentColor} is now in check")
             else:
                 selfPieceset.pieces[index].moveset.checkingKing = False
             index += 1
@@ -176,13 +213,17 @@ class Game:
         :return: None
         """
         capturedPiece = newTile.currentPiece
+        assert capturedPiece.name != "king", "The king cannot be captured!!"
 
         opponentPieces = self.chessBoard.getPieceSet(capturedPiece.colorPrefix).pieces
         capturedPiecesObj = self.chessBoard.getCapturedMargin(self.chessBoard.currentlyClicked.currentPiece.colorPrefix)
 
         opponentPieces.pop(opponentPieces.index(capturedPiece))
+        capturedPiece.captured = True
         newTile.currentPiece = None
         capturedPiecesObj.addCapturedPiece(capturedPiece)
+
+        self.turnsSinceCapture = 0
 
     def checkPawnDoublestep(self, chessPiece, newTileY):
         """
@@ -200,7 +241,7 @@ class Game:
 
     def checkEnPassant(self, newTileIndices):
         """
-        Checks if an en passant move is possible. Strictly for pawns. Additionally ASSUMES the provided newTile is not
+        Checks if the given move is en passant. Strictly for pawns. Additionally ASSUMES the provided newTile is not
         occupied by anything, as opponent-occupied tiles should have been caught in self.checkBoardClick.
         Executes the en passant move if possible.
         :param newTileIndices: Tuple of the newTile indices. Explicitly passed in because Tile objects do not have an
@@ -274,12 +315,17 @@ class Game:
 
     @staticmethod
     def verifySacrificialPiece(sacrificialPiece, quadrant, kingVulnerablePaths):
+        if Game.diagnostic:
+            print("===========Piece blocking check (proactive)")
+            print(sacrificialPiece.moveset)
+
         for key in sacrificialPiece.moveset.verifiedMoveset.keys():
             updatedQuadrant = []
             for move in sacrificialPiece.moveset.verifiedMoveset[key]:
                 if move in kingVulnerablePaths[quadrant]:
                     updatedQuadrant.append(move)
             sacrificialPiece.moveset.verifiedMoveset[key] = updatedQuadrant
+
     @staticmethod
     def getKingVulnerablePaths(kingPiece):
         """
@@ -306,14 +352,14 @@ class CheckPiece:
         self.checkQuadrant = self.getCheckQuadrant()
 
     def getCheckQuadrant(self):
-        pieceMoveset = self.piece.moveset.verifiedMoveset
         kingIndices = (self.checkedKing.xIndex, self.checkedKing.yIndex)
 
         checkQuadrant = None
 
-        for quadrantKey in pieceMoveset.keys():
-            if (self.checkedKing.xIndex, self.checkedKing.yIndex) in pieceMoveset[quadrantKey]:
-                checkQuadrant = pieceMoveset[quadrantKey]
+        for quadrantKey in self.piece.moveset.verifiedMoveset.keys():
+            if (self.checkedKing.xIndex, self.checkedKing.yIndex) in self.piece.moveset.verifiedMoveset[quadrantKey]:
+                checkQuadrant = self.piece.moveset.verifiedMoveset[quadrantKey]
+                break
 
         if not checkQuadrant:
             raise Exception("The given ChessPiece does not put the king in check.")
@@ -359,9 +405,9 @@ class CheckPiece:
                 elif move in self.checkQuadrant:
                     blockMoves[key].append(move)
 
-        # deleteme diagnostic
-        print(f"=sacrificial piece: {piece.colorPrefix}{piece.name:<6}[{piece.num:}]"
-              f"                                                 {blockMoves}")
+        if Game.diagnostic:
+            print(f"=sacrificial piece: {piece.colorPrefix}{piece.name:<6}[{piece.num:}]"
+                    f"                                                 {blockMoves}")
 
         return blockMoves
 

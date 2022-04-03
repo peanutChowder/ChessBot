@@ -27,15 +27,14 @@ class MoveSet:
     :var self.position: tuple of the current piece's indices
     :var self.colorPrefix: string of the current piece's color prefix
     """
-    chessBoard = None
-    @classmethod
-    def setChessBoard(cls, board):
-        cls.chessBoard = board
+    diagnostic = False
 
-    def __init__(self, piece):
+    def __init__(self, piece, board):
         """
 
         """
+        self.chessBoard = board
+
         self.unverifiedMoveset = {"up": [], "down": [], "left": [], "right": [],
                                  "left-up": [], "right-up": [], "right-down": [], "left-down": []}
 
@@ -48,14 +47,15 @@ class MoveSet:
                               "bishop": self.bishop, "queen": self.queen, "king": self.king}
         self.protectedPieces = []
 
-        self.pieceName = piece.name
-        self.position = (piece.xIndex, piece.yIndex)
-        self.colorPrefix = piece.colorPrefix
-        self.startPos = piece.startPos
-        self.unMoved = piece.unMoved
-        self.id = piece.num
+        if piece != "lightweight":
+            self.pieceName = piece.name
+            self.position = (piece.xIndex, piece.yIndex)
+            self.colorPrefix = piece.colorPrefix
+            self.startPos = piece.startPos
+            self.unMoved = piece.unMoved
+            self.id = piece.num
 
-        self.checkingKing = False
+            self.checkingKing = False
 
     def __getitem__(self, key):
         if key == "unverifiedMoveset":
@@ -66,7 +66,7 @@ class MoveSet:
             raise Exception("Invalid key provided for moveset getter")
 
     def __str__(self):
-        return f"{self.colorPrefix}{self.pieceName}[{self.id}]"
+        return f"{self.colorPrefix}-{self.pieceName}-{self.id}-{self.unMoved}"
 
     def __len__(self):
         length = 0
@@ -75,18 +75,31 @@ class MoveSet:
 
         return length
 
+    def getListifiedVerifiedset(self):
+        """
+        Gets the list version of verifiedMoveset. Move positions are no longer differentiated by quadrant and all kept
+        together.
+        :return: list of the verified moves
+        """
+        listVerifiedMoves = []
+
+        for key in self.verifiedMoveset.keys():
+            listVerifiedMoves += self.verifiedMoveset[key]
+
+        return listVerifiedMoves
+
     def getListifiedCaptureset(self):
         """
         Gets the list version of verifiedCaptureset. Move positions are no longer differentiated by quadrant and all kept
         together.
         :return: list of the verified moves
         """
-        listVerifiedMoves = []
+        listCaptureMoves = []
 
         for key in self.verifiedCaptureset.keys():
-            listVerifiedMoves += self.verifiedCaptureset[key]
+            listCaptureMoves += self.verifiedCaptureset[key]
 
-        return listVerifiedMoves
+        return listCaptureMoves
 
     def updatePosition(self, newPos):
         """
@@ -113,19 +126,20 @@ class MoveSet:
         self.protectedPieces = []
 
     def getMoves(self):
-        print(" ========================================================\n"
-              "                      NAME: ", self.pieceName)
+        if MoveSet.diagnostic:
+            print(" ========================================================\n"
+                  "                      NAME: ", self.pieceName)
         self.clearMovesets()
 
         self.setUnverifiedMoveset()
         self.verifyMoveset()
         self.setCaptureset()
 
-        print(f"getMoves called on ======================================{self}:\n"
-              f"    verified: {self.verifiedMoveset}\n"
-              f"    protected: {self.protectedPieces}\n"
-              f"    capture: {self.verifiedCaptureset}")
-
+        if MoveSet.diagnostic:
+            print(f"getMoves called on ======================================{self}:\n"
+                  f"    verified: {self.verifiedMoveset}\n"
+                  f"    protected: {self.protectedPieces}\n"
+                  f"    capture: {self.verifiedCaptureset}")
 
     def setUnverifiedMoveset(self):
         self.pieceMovesets[self.pieceName]()
@@ -168,7 +182,7 @@ class MoveSet:
 
                     # Pieces cannot move onto or through a piece containing their own color. However these pieces are
                     # protected
-                    elif self.tileOccupiedBySelf(tuplePosition) and not self.pieceName == "knight":
+                    elif self.tileOccupiedBySelf(tuplePosition):
                         self.verifiedCaptureset[quadrant].append(tuplePosition)
                         break
 
@@ -203,6 +217,10 @@ class MoveSet:
 
                     # Pieces cannot move onto or through a piece containing their own color. However these pieces are
                     # protected
+                    # TODO: WARNING: Pieces protected by the knight will NOT be appended to protectedPieces, due to the
+                    #   the second part of the elif clause. This deficiency is covered by captureSets as it takes into
+                    #   account any protected pieces.
+                    #   Consider removing protectedPieces altogether since it is redundant and could cause confusion
                     elif self.tileOccupiedBySelf(tuplePosition) and not self.pieceName == "knight":
                         self.protectedPieces.append(tuplePosition)
                         break
@@ -291,6 +309,7 @@ class MoveSet:
         kingsideCastling = True
         kingPiece = self.chessBoard.board[self.position[0]][self.position[1]].currentPiece
 
+        # TODO: using kingPiece is kind of redundant. defeats the purpose of passing in king attr into moveset obj
         if not (kingPiece.name == "king" and kingPiece.unMoved):
             pass
         else:
@@ -421,8 +440,9 @@ class MoveSet:
         :return: None
         """
         # Offsets are clockwise, beginning with left-up
-        offsetDirections = [[(-2, 1), (-1, 2)], [(1, 2), (2, 1)],
-                            [(2, -1), (1, -2)], [(-1, -2), (-2, -1)]]
+        offsetDirections = [[(-1, -2), (-2, -1)], [(2, -1), (1, -2)],
+                            [(1, 2), (2, 1)], [(-2, 1), (-1, 2)]]
+
         directionNames = ["left-up", "right-up",
                           "right-down", "left-down"]
         currentX, currentY = self.position[0], self.position[1]
